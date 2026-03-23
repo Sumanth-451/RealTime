@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 import requests
 import os
+from dotenv import load_dotenv
 from aws_requests_auth.aws_auth import AWSRequestsAuth
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = FastAPI()
 
