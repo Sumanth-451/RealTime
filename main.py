@@ -4,7 +4,6 @@ import os
 from dotenv import load_dotenv
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 from datetime import datetime
-import uvicorn
 
 # Load environment variables
 
@@ -42,15 +41,20 @@ data = {
     "client_secret": CLIENT_SECRET,
 }
 
-response = requests.post(url, data=data)
+try:
+    response = requests.post(url, data=data)
+    response.raise_for_status()
 
-if response.status_code != 200:
-    return {
-        "error": "Token error",
-        "details": response.text
-    }
+    token = response.json().get("access_token")
 
-return response.json().get("access_token")
+    if not token:
+        raise Exception("No access token received")
+
+    return token
+
+except Exception as e:
+    print("❌ Token Error:", str(e))
+    raise
 ```
 
 # ✅ Health Check
@@ -149,9 +153,3 @@ except requests.exceptions.HTTPError:
 except Exception as e:
     return {"error": str(e)}
 ```
-
-# ✅ Render Entry Point
-
-if **name** == "**main**":
-port = int(os.environ.get("PORT", 10000))
-uvicorn.run(app, host="0.0.0.0", port=port)
