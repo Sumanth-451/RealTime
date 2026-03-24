@@ -72,42 +72,41 @@ def get_shipments():
 
         while True:
 
-            # 🔁 If NextToken exists → use it
+            # ✅ Always include base filters
+            base_params = [
+                ("ShipmentStatusList", "WORKING"),
+                ("ShipmentStatusList", "READY_TO_SHIP"),
+                ("ShipmentStatusList", "SHIPPED"),
+                ("ShipmentStatusList", "IN_TRANSIT"),
+                ("ShipmentStatusList", "DELIVERED"),
+                ("ShipmentStatusList", "CHECKED_IN"),
+                ("ShipmentStatusList", "RECEIVING"),
+                ("ShipmentStatusList", "CLOSED"),
+                ("ShipmentStatusList", "CANCELLED"),
+                ("ShipmentStatusList", "DELETED"),
+                ("MarketplaceId", "ATVPDKIKX0DER"),
+                ("LastUpdatedAfter", "2024-01-01T00:00:00Z")
+            ]
+
+            # 🔁 Add NextToken if present
             if next_token:
-                params = {
-                    "NextToken": next_token
-                }
+                params = base_params + [("NextToken", next_token)]
             else:
-                # 🔥 First request with ALL statuses
-                params = [
-                    ("ShipmentStatusList", "WORKING"),
-                    ("ShipmentStatusList", "READY_TO_SHIP"),
-                    ("ShipmentStatusList", "SHIPPED"),
-                    ("ShipmentStatusList", "IN_TRANSIT"),
-                    ("ShipmentStatusList", "DELIVERED"),
-                    ("ShipmentStatusList", "CHECKED_IN"),
-                    ("ShipmentStatusList", "RECEIVING"),
-                    ("ShipmentStatusList", "CLOSED"),
-                    ("ShipmentStatusList", "CANCELLED"),
-                    ("ShipmentStatusList", "DELETED"),
-                    ("MarketplaceId", "ATVPDKIKX0DER"),
-                    ("LastUpdatedAfter", "2024-01-01T00:00:00Z")
-                ]
+                params = base_params
 
             response = requests.get(url, auth=auth, headers=headers, params=params)
 
-            print("API Response:", response.text)  # Debug
+            print("API Response:", response.text)  # Debug log
 
             response.raise_for_status()
 
             data = response.json()
-
             payload = data.get("payload", {})
-            shipments = payload.get("ShipmentData", [])
 
+            shipments = payload.get("ShipmentData", [])
             all_shipments.extend(shipments)
 
-            # 🔁 Check for next page
+            # 🔁 Get next token
             next_token = payload.get("NextToken")
 
             if not next_token:
