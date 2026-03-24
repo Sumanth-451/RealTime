@@ -77,7 +77,6 @@ def get_shipments():
         }
 
         params = {
-            "ShipmentStatusList": ["WORKING", "SHIPPED", "IN_TRANSIT"],
             "MarketplaceId": "ATVPDKIKX0DER"
         }
 
