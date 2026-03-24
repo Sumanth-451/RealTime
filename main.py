@@ -6,16 +6,13 @@ from aws_requests_auth.aws_auth import AWSRequestsAuth
 from datetime import datetime
 import uvicorn
 
-# Load environment variables
 load_dotenv()
 
 app = FastAPI()
 
-# 🔐 Environment Variables
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
-
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 
@@ -23,9 +20,10 @@ REGION = "us-east-1"
 HOST = "sellingpartnerapi-na.amazon.com"
 SERVICE = "execute-api"
 
-# ✅ Step 1: Get LWA Access Token
+
 def get_access_token():
     url = "https://api.amazon.com/auth/o2/token"
+
     data = {
         "grant_type": "refresh_token",
         "refresh_token": REFRESH_TOKEN,
@@ -33,28 +31,21 @@ def get_access_token():
         "client_secret": CLIENT_SECRET,
     }
 
-    try:
-        response = requests.post(url, data=data)
-        response.raise_for_status()
-        token = response.json().get("access_token")
+    response = requests.post(url, data=data)
+    response.raise_for_status()
 
-        if not token:
-            raise Exception("No access token received")
+    token = response.json().get("access_token")
+    if not token:
+        raise Exception("No access token received")
 
-        return token
-
-    except Exception as e:
-        print("❌ Error getting access token:", str(e))
-        raise
+    return token
 
 
-# ✅ Root Endpoint (Health Check)
 @app.get("/")
 def root():
-    return {"message": "SP-API service is running 🚀"}
+    return {"message": "SP-API service is running"}
 
 
-# ✅ Step 2: Get Shipments
 @app.get("/getShipments")
 def get_shipments():
     try:
@@ -76,28 +67,39 @@ def get_shipments():
             "x-amz-date": datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
         }
 
-        params = {
-            "MarketplaceId": "ATVPDKIKX0DER"
-        }
+        # ✅ FIXED PARAMS (CRITICAL CHANGE)
+        params = [
+            ("ShipmentStatusList", "WORKING"),
+            ("ShipmentStatusList", "READY_TO_SHIP"),
+            ("ShipmentStatusList", "SHIPPED"),
+            ("ShipmentStatusList", "IN_TRANSIT"),
+            ("ShipmentStatusList", "DELIVERED"),
+            ("ShipmentStatusList", "CHECKED_IN"),
+            ("ShipmentStatusList", "RECEIVING"),
+            ("ShipmentStatusList", "CLOSED"),
+            ("ShipmentStatusList", "CANCELLED"),
+            ("ShipmentStatusList", "DELETED"),
+            ("MarketplaceId", "ATVPDKIKX0DER")
+        ]
 
         response = requests.get(url, auth=auth, headers=headers, params=params)
 
-        print("📦 Shipments Response:", response.text)
+        print("Shipments Response:", response.text)
 
         response.raise_for_status()
         return response.json()
 
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.HTTPError:
         return {
             "error": "Failed to fetch shipments",
             "status_code": response.status_code,
             "details": response.text
         }
+
     except Exception as e:
         return {"error": str(e)}
 
 
-# ✅ Step 3: Get Shipment by ID
 @app.get("/getShipment/{shipment_id}")
 def get_shipment(shipment_id: str):
     try:
@@ -121,22 +123,22 @@ def get_shipment(shipment_id: str):
 
         response = requests.get(url, auth=auth, headers=headers)
 
-        print(f"📦 Shipment {shipment_id} Response:", response.text)
+        print(f"Shipment {shipment_id} Response:", response.text)
 
         response.raise_for_status()
         return response.json()
 
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.HTTPError:
         return {
             "error": "Failed to fetch shipment",
             "status_code": response.status_code,
             "details": response.text
         }
+
     except Exception as e:
         return {"error": str(e)}
 
 
-# ✅ Render Entry Point
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
