@@ -67,28 +67,31 @@ def get_shipments(next_token: str = None):
 
         url = f"https://{HOST}/fba/inbound/v0/shipments"
 
-        # ✅ Base filters (ALL statuses)
-        base_params = [
-            ("ShipmentStatusList", "WORKING"),
-            ("ShipmentStatusList", "READY_TO_SHIP"),
-            ("ShipmentStatusList", "SHIPPED"),
-            ("ShipmentStatusList", "IN_TRANSIT"),
-            ("ShipmentStatusList", "DELIVERED"),
-            ("ShipmentStatusList", "CHECKED_IN"),
-            ("ShipmentStatusList", "RECEIVING"),
-            ("ShipmentStatusList", "CLOSED"),
-            ("ShipmentStatusList", "CANCELLED"),
-            ("ShipmentStatusList", "DELETED"),
-            ("MarketplaceId", "ATVPDKIKX0DER"),
-        ]
-
-        # 🔁 Add NextToken if exists
-        if next_token:
-            params = base_params + [("NextToken", next_token)]
+        # ✅ FIRST REQUEST → use filters
+        if not next_token:
+            params = [
+                ("ShipmentStatusList", "WORKING"),
+                ("ShipmentStatusList", "READY_TO_SHIP"),
+                ("ShipmentStatusList", "SHIPPED"),
+                ("ShipmentStatusList", "IN_TRANSIT"),
+                ("ShipmentStatusList", "DELIVERED"),
+                ("ShipmentStatusList", "CHECKED_IN"),
+                ("ShipmentStatusList", "RECEIVING"),
+                ("ShipmentStatusList", "CLOSED"),
+                ("ShipmentStatusList", "CANCELLED"),
+                ("ShipmentStatusList", "DELETED"),
+                ("MarketplaceId", "ATVPDKIKX0DER")
+            ]
         else:
-            params = base_params
+            # 🔥 NEXT REQUEST → ONLY NextToken (CRITICAL FIX)
+            params = {
+                "NextToken": next_token
+            }
 
         response = requests.get(url, auth=auth, headers=headers, params=params)
+
+        print("API Response:", response.text)
+
         response.raise_for_status()
 
         data = response.json()
