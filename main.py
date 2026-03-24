@@ -59,35 +59,64 @@ def get_shipments():
             aws_service=SERVICE,
         )
 
-        url = f"https://{HOST}/fba/inbound/v0/shipments"
-
         headers = {
             "x-amz-access-token": access_token,
             "Content-Type": "application/json",
             "x-amz-date": datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
         }
 
-        # ✅ FIXED PARAMS (CRITICAL CHANGE)
-        params = [
-            ("ShipmentStatusList", "WORKING"),
-            ("ShipmentStatusList", "READY_TO_SHIP"),
-            ("ShipmentStatusList", "SHIPPED"),
-            ("ShipmentStatusList", "IN_TRANSIT"),
-            ("ShipmentStatusList", "DELIVERED"),
-            ("ShipmentStatusList", "CHECKED_IN"),
-            ("ShipmentStatusList", "RECEIVING"),
-            ("ShipmentStatusList", "CLOSED"),
-            ("ShipmentStatusList", "CANCELLED"),
-            ("ShipmentStatusList", "DELETED"),
-            ("MarketplaceId", "ATVPDKIKX0DER")
-        ]
+        url = f"https://{HOST}/fba/inbound/v0/shipments"
 
-        response = requests.get(url, auth=auth, headers=headers, params=params)
+        all_shipments = []
+        next_token = None
 
-        print("Shipments Response:", response.text)
+        while True:
 
-        response.raise_for_status()
-        return response.json()
+            # 🔁 If NextToken exists → use it
+            if next_token:
+                params = {
+                    "NextToken": next_token
+                }
+            else:
+                # 🔥 First request with ALL statuses
+                params = [
+                    ("ShipmentStatusList", "WORKING"),
+                    ("ShipmentStatusList", "READY_TO_SHIP"),
+                    ("ShipmentStatusList", "SHIPPED"),
+                    ("ShipmentStatusList", "IN_TRANSIT"),
+                    ("ShipmentStatusList", "DELIVERED"),
+                    ("ShipmentStatusList", "CHECKED_IN"),
+                    ("ShipmentStatusList", "RECEIVING"),
+                    ("ShipmentStatusList", "CLOSED"),
+                    ("ShipmentStatusList", "CANCELLED"),
+                    ("ShipmentStatusList", "DELETED"),
+                    ("MarketplaceId", "ATVPDKIKX0DER"),
+                    ("LastUpdatedAfter", "2024-01-01T00:00:00Z")
+                ]
+
+            response = requests.get(url, auth=auth, headers=headers, params=params)
+
+            print("API Response:", response.text)  # Debug
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            payload = data.get("payload", {})
+            shipments = payload.get("ShipmentData", [])
+
+            all_shipments.extend(shipments)
+
+            # 🔁 Check for next page
+            next_token = payload.get("NextToken")
+
+            if not next_token:
+                break
+
+        return {
+            "count": len(all_shipments),
+            "shipments": all_shipments
+        }
 
     except requests.exceptions.HTTPError:
         return {
@@ -126,6 +155,7 @@ def get_shipment(shipment_id: str):
         print(f"Shipment {shipment_id} Response:", response.text)
 
         response.raise_for_status()
+
         return response.json()
 
     except requests.exceptions.HTTPError:
