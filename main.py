@@ -80,7 +80,6 @@ def get_shipments(next_token: str = None):
             ("ShipmentStatusList", "CANCELLED"),
             ("ShipmentStatusList", "DELETED"),
             ("MarketplaceId", "ATVPDKIKX0DER"),
-            ("LastUpdatedAfter", "2024-01-01T00:00:00Z")
         ]
 
         # 🔁 Add NextToken if exists
