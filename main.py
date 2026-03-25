@@ -79,7 +79,6 @@ def get_shipments(next_token: str = None):
         url = f"https://{HOST}/fba/inbound/v0/shipments"
 
         base_params = [
-            ("ShipmentStatusList", "WORKING"),
             ("ShipmentStatusList", "READY_TO_SHIP"),
             ("ShipmentStatusList", "SHIPPED"),
             ("ShipmentStatusList", "IN_TRANSIT"),
