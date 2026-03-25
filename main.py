@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 from datetime import datetime
 import uvicorn
+import time
 
 load_dotenv()
 
@@ -42,7 +43,7 @@ def get_access_token():
     return token
 
 
-# 🔐 COMMON AUTH HELPER (NEW)
+# 🔐 COMMON AUTH
 def get_auth():
     return AWSRequestsAuth(
         aws_access_key=AWS_ACCESS_KEY,
@@ -67,7 +68,7 @@ def root():
     return {"message": "SP-API service is running"}
 
 
-# 🚚 GET SHIPMENTS (SINGLE PAGE)
+# 🚚 GET SINGLE PAGE
 @app.get("/getShipments")
 def get_shipments(next_token: str = None):
     try:
@@ -107,7 +108,7 @@ def get_shipments(next_token: str = None):
         return {"error": str(e)}
 
 
-# 🚀 NEW: GET ALL SHIPMENTS (AUTO PAGINATION)
+# 🚀 GET ALL SHIPMENTS (AUTO PAGINATION + RATE LIMIT SAFE)
 @app.get("/getAllShipments")
 def get_all_shipments():
     try:
@@ -137,8 +138,18 @@ def get_all_shipments():
         while True:
             params = base_params + ([("NextToken", next_token)] if next_token else [])
 
-            response = requests.get(url, auth=auth, headers=headers, params=params)
-            response.raise_for_status()
+            # 🔁 RETRY WITH BACKOFF
+            for attempt in range(5):
+                response = requests.get(url, auth=auth, headers=headers, params=params)
+
+                if response.status_code == 429:
+                    wait_time = 2 ** attempt
+                    print(f"Rate limited. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+
+                response.raise_for_status()
+                break
 
             payload = response.json().get("payload", {})
 
@@ -149,6 +160,9 @@ def get_all_shipments():
 
             if not next_token:
                 break
+
+            # ✅ SAFE DELAY
+            time.sleep(0.6)
 
         return {
             "totalShipments": len(all_shipments),
