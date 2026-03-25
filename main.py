@@ -42,31 +42,38 @@ def get_access_token():
     return token
 
 
+# 🔐 COMMON AUTH HELPER (NEW)
+def get_auth():
+    return AWSRequestsAuth(
+        aws_access_key=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_KEY,
+        aws_host=HOST,
+        aws_region=REGION,
+        aws_service=SERVICE,
+    )
+
+
+def get_headers(access_token):
+    return {
+        "x-amz-access-token": access_token,
+        "Content-Type": "application/json",
+        "x-amz-date": datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    }
+
+
 # 🏠 ROOT
 @app.get("/")
 def root():
     return {"message": "SP-API service is running"}
 
 
-# 🚚 GET SHIPMENTS (REAL-TIME API)
+# 🚚 GET SHIPMENTS (SINGLE PAGE)
 @app.get("/getShipments")
 def get_shipments(next_token: str = None):
     try:
         access_token = get_access_token()
-
-        auth = AWSRequestsAuth(
-            aws_access_key=AWS_ACCESS_KEY,
-            aws_secret_access_key=AWS_SECRET_KEY,
-            aws_host=HOST,
-            aws_region=REGION,
-            aws_service=SERVICE,
-        )
-
-        headers = {
-            "x-amz-access-token": access_token,
-            "Content-Type": "application/json",
-            "x-amz-date": datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-        }
+        auth = get_auth()
+        headers = get_headers(access_token)
 
         url = f"https://{HOST}/fba/inbound/v0/shipments"
 
@@ -84,27 +91,68 @@ def get_shipments(next_token: str = None):
             ("MarketplaceId", "ATVPDKIKX0DER")
         ]
 
-        if next_token:
-            params = base_params + [("NextToken", next_token)]
-        else:
-            params = base_params
+        params = base_params + ([("NextToken", next_token)] if next_token else [])
 
         response = requests.get(url, auth=auth, headers=headers, params=params)
         response.raise_for_status()
 
-        data = response.json()
-        payload = data.get("payload", {})
+        payload = response.json().get("payload", {})
 
         return {
             "shipments": payload.get("ShipmentData", []),
             "nextToken": payload.get("NextToken")
         }
 
-    except requests.exceptions.HTTPError:
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# 🚀 NEW: GET ALL SHIPMENTS (AUTO PAGINATION)
+@app.get("/getAllShipments")
+def get_all_shipments():
+    try:
+        access_token = get_access_token()
+        auth = get_auth()
+        headers = get_headers(access_token)
+
+        url = f"https://{HOST}/fba/inbound/v0/shipments"
+
+        base_params = [
+            ("ShipmentStatusList", "WORKING"),
+            ("ShipmentStatusList", "READY_TO_SHIP"),
+            ("ShipmentStatusList", "SHIPPED"),
+            ("ShipmentStatusList", "IN_TRANSIT"),
+            ("ShipmentStatusList", "DELIVERED"),
+            ("ShipmentStatusList", "CHECKED_IN"),
+            ("ShipmentStatusList", "RECEIVING"),
+            ("ShipmentStatusList", "CLOSED"),
+            ("ShipmentStatusList", "CANCELLED"),
+            ("ShipmentStatusList", "DELETED"),
+            ("MarketplaceId", "ATVPDKIKX0DER")
+        ]
+
+        all_shipments = []
+        next_token = None
+
+        while True:
+            params = base_params + ([("NextToken", next_token)] if next_token else [])
+
+            response = requests.get(url, auth=auth, headers=headers, params=params)
+            response.raise_for_status()
+
+            payload = response.json().get("payload", {})
+
+            shipments = payload.get("ShipmentData", [])
+            all_shipments.extend(shipments)
+
+            next_token = payload.get("NextToken")
+
+            if not next_token:
+                break
+
         return {
-            "error": "Failed to fetch shipments",
-            "status_code": response.status_code,
-            "details": response.text
+            "totalShipments": len(all_shipments),
+            "shipments": all_shipments
         }
 
     except Exception as e:
@@ -116,129 +164,10 @@ def get_shipments(next_token: str = None):
 def get_shipment(shipment_id: str):
     try:
         access_token = get_access_token()
-
-        auth = AWSRequestsAuth(
-            aws_access_key=AWS_ACCESS_KEY,
-            aws_secret_access_key=AWS_SECRET_KEY,
-            aws_host=HOST,
-            aws_region=REGION,
-            aws_service=SERVICE,
-        )
+        auth = get_auth()
+        headers = get_headers(access_token)
 
         url = f"https://{HOST}/fba/inbound/v0/shipments/{shipment_id}"
-
-        headers = {
-            "x-amz-access-token": access_token,
-            "Content-Type": "application/json",
-            "x-amz-date": datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-        }
-
-        response = requests.get(url, auth=auth, headers=headers)
-        response.raise_for_status()
-
-        return response.json()
-
-    except requests.exceptions.HTTPError:
-        return {
-            "error": "Failed to fetch shipment",
-            "status_code": response.status_code,
-            "details": response.text
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# 📊 CREATE REPORT (YOUR NEW ENDPOINT)
-@app.get("/createInboundShipmentReport")
-def create_inbound_report():
-    try:
-        access_token = get_access_token()
-
-        auth = AWSRequestsAuth(
-            aws_access_key=AWS_ACCESS_KEY,
-            aws_secret_access_key=AWS_SECRET_KEY,
-            aws_host=HOST,
-            aws_region=REGION,
-            aws_service=SERVICE,
-        )
-
-        url = f"https://{HOST}/reports/2021-06-30/reports"
-
-        headers = {
-            "x-amz-access-token": access_token,
-            "Content-Type": "application/json"
-        }
-
-        body = {
-            "reportType": "GET_FBA_FULFILLMENT_INBOUND_SHIPMENT",
-            "marketplaceIds": ["ATVPDKIKX0DER"] 
-        }
-
-        response = requests.post(url, auth=auth, headers=headers, json=body)
-        response.raise_for_status()
-
-        return response.json()
-
-    except requests.exceptions.HTTPError:
-        return {
-            "error": "Failed to create report",
-            "status_code": response.status_code,
-            "details": response.text
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# 📊 GET REPORT STATUS
-@app.get("/getReport/{report_id}")
-def get_report(report_id: str):
-    try:
-        access_token = get_access_token()
-
-        auth = AWSRequestsAuth(
-            aws_access_key=AWS_ACCESS_KEY,
-            aws_secret_access_key=AWS_SECRET_KEY,
-            aws_host=HOST,
-            aws_region=REGION,
-            aws_service=SERVICE,
-        )
-
-        url = f"https://{HOST}/reports/2021-06-30/reports/{report_id}"
-
-        headers = {
-            "x-amz-access-token": access_token
-        }
-
-        response = requests.get(url, auth=auth, headers=headers)
-        response.raise_for_status()
-
-        return response.json()
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# 📊 GET REPORT DOCUMENT
-@app.get("/getDocument/{document_id}")
-def get_document(document_id: str):
-    try:
-        access_token = get_access_token()
-
-        auth = AWSRequestsAuth(
-            aws_access_key=AWS_ACCESS_KEY,
-            aws_secret_access_key=AWS_SECRET_KEY,
-            aws_host=HOST,
-            aws_region=REGION,
-            aws_service=SERVICE,
-        )
-
-        url = f"https://{HOST}/reports/2021-06-30/documents/{document_id}"
-
-        headers = {
-            "x-amz-access-token": access_token
-        }
 
         response = requests.get(url, auth=auth, headers=headers)
         response.raise_for_status()
