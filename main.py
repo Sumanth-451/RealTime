@@ -21,7 +21,9 @@ REGION = "us-east-1"
 HOST = "sellingpartnerapi-na.amazon.com"
 SERVICE = "execute-api"
 
+# ✅ INCLUDE WORKING STATUS
 TRACKING_STATUSES = [
+    "WORKING",
     "READY_TO_SHIP",
     "SHIPPED",
     "IN_TRANSIT",
@@ -29,6 +31,7 @@ TRACKING_STATUSES = [
     "RECEIVING",
     "CLOSED"
 ]
+
 
 # 🔐 GET ACCESS TOKEN
 def get_access_token():
@@ -71,12 +74,6 @@ def get_headers(access_token):
     }
 
 
-# 🏠 ROOT
-@app.get("/")
-def root():
-    return {"message": "SP-API realtime service running"}
-
-
 # 🧠 ENRICH SHIPMENT DATA
 def enrich_shipment(shipment):
     status = shipment.get("ShipmentStatus")
@@ -89,17 +86,18 @@ def enrich_shipment(shipment):
         "destinationFC": shipment.get("DestinationFulfillmentCenterId"),
         "areCasesRequired": shipment.get("AreCasesRequired"),
         "shipmentType": shipment.get("ShipmentType"),
-        "lastUpdated": shipment.get("LastUpdatedDate"),
+        # ✅ fallback fix
+        "lastUpdated": shipment.get("LastUpdatedDate") or shipment.get("CreatedDate"),
         "isMoving": status in ["SHIPPED", "IN_TRANSIT"],
         "isCompleted": status in ["DELIVERED", "CLOSED"]
     }
 
 
-# 🚀 REALTIME SHIPMENTS API
+# 🚀 MAIN REALTIME ENDPOINT
 @app.get("/getShipmentsRealtime")
 def get_shipments_realtime(
     last_updated_after: str = Query(None),
-    max_pages: int = 5,
+    max_pages: int = 2,
     include_items: bool = False
 ):
     try:
@@ -118,6 +116,8 @@ def get_shipments_realtime(
             base_params.append(("LastUpdatedAfter", last_updated_after))
 
         all_shipments = []
+        seen_shipments = set()
+
         next_token = None
         pages_fetched = 0
 
@@ -141,17 +141,23 @@ def get_shipments_realtime(
             shipments = payload.get("ShipmentData", [])
 
             for shipment in shipments:
+                shipment_id = shipment.get("ShipmentId")
+
+                # ✅ DEDUPLICATION
+                if shipment_id in seen_shipments:
+                    continue
+
+                seen_shipments.add(shipment_id)
+
                 enriched = enrich_shipment(shipment)
 
-                # 📦 OPTIONAL: FETCH ITEMS
+                # 📦 OPTIONAL ITEMS
                 if include_items:
-                    items = get_shipment_items(
-                        shipment["ShipmentId"],
-                        access_token,
+                    enriched["items"] = get_shipment_items(
+                        shipment_id,
                         auth,
                         headers
                     )
-                    enriched["items"] = items
 
                 all_shipments.append(enriched)
 
@@ -161,12 +167,11 @@ def get_shipments_realtime(
             if not next_token:
                 break
 
-            time.sleep(0.6)
+            time.sleep(0.5)
 
         return {
             "count": len(all_shipments),
-            "shipments": all_shipments,
-            "nextToken": next_token
+            "shipments": all_shipments
         }
 
     except Exception as e:
@@ -174,7 +179,7 @@ def get_shipments_realtime(
 
 
 # 📦 GET SHIPMENT ITEMS
-def get_shipment_items(shipment_id, access_token, auth, headers):
+def get_shipment_items(shipment_id, auth, headers):
     try:
         url = f"https://{HOST}/fba/inbound/v0/shipments/{shipment_id}/items"
 
@@ -189,13 +194,22 @@ def get_shipment_items(shipment_id, access_token, auth, headers):
                 "sku": item.get("FulfillmentNetworkSKU"),
                 "quantityShipped": item.get("QuantityShipped"),
                 "quantityReceived": item.get("QuantityReceived"),
-                "difference": (item.get("QuantityShipped", 0) - item.get("QuantityReceived", 0))
+                "difference": (
+                    item.get("QuantityShipped", 0)
+                    - item.get("QuantityReceived", 0)
+                )
             }
             for item in items
         ]
 
     except Exception as e:
         return [{"error": str(e)}]
+
+
+# 🏠 ROOT
+@app.get("/")
+def root():
+    return {"message": "SP-API realtime service running"}
 
 
 # ▶️ RUN SERVER
