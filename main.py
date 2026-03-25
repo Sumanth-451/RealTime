@@ -22,7 +22,7 @@ HOST = "sellingpartnerapi-na.amazon.com"
 SERVICE = "execute-api"
 
 
-# 🔐 GET LWA ACCESS TOKEN
+# 🔐 GET ACCESS TOKEN
 def get_access_token():
     url = "https://api.amazon.com/auth/o2/token"
 
@@ -43,7 +43,7 @@ def get_access_token():
     return token
 
 
-# 🔐 COMMON AUTH
+# 🔐 AUTH + HEADERS
 def get_auth():
     return AWSRequestsAuth(
         aws_access_key=AWS_ACCESS_KEY,
@@ -68,7 +68,7 @@ def root():
     return {"message": "SP-API service is running"}
 
 
-# 🚚 GET SINGLE PAGE
+# 🚚 GET SINGLE PAGE (OPTIONAL)
 @app.get("/getShipments")
 def get_shipments(next_token: str = None):
     try:
@@ -108,9 +108,9 @@ def get_shipments(next_token: str = None):
         return {"error": str(e)}
 
 
-# 🚀 GET ALL SHIPMENTS (AUTO PAGINATION + RATE LIMIT SAFE)
-@app.get("/getAllShipments")
-def get_all_shipments():
+# 🚀 FINAL: BATCH PAGINATION (NO TIMEOUT)
+@app.get("/getShipmentsBatch")
+def get_shipments_batch(max_pages: int = 3, next_token: str = None):
     try:
         access_token = get_access_token()
         auth = get_auth()
@@ -133,12 +133,12 @@ def get_all_shipments():
         ]
 
         all_shipments = []
-        next_token = None
+        pages_fetched = 0
 
-        while True:
+        while pages_fetched < max_pages:
             params = base_params + ([("NextToken", next_token)] if next_token else [])
 
-            # 🔁 RETRY WITH BACKOFF
+            # 🔁 HANDLE RATE LIMIT
             for attempt in range(5):
                 response = requests.get(url, auth=auth, headers=headers, params=params)
 
@@ -157,16 +157,17 @@ def get_all_shipments():
             all_shipments.extend(shipments)
 
             next_token = payload.get("NextToken")
+            pages_fetched += 1
 
             if not next_token:
                 break
 
-            # ✅ SAFE DELAY
+            # ✅ SAFE DELAY BETWEEN CALLS
             time.sleep(0.6)
 
         return {
-            "totalShipments": len(all_shipments),
-            "shipments": all_shipments
+            "shipments": all_shipments,
+            "nextToken": next_token
         }
 
     except Exception as e:
