@@ -171,7 +171,8 @@ def create_inbound_report():
         }
 
         body = {
-            "reportType": "GET_FBA_FULFILLMENT_INBOUND_SHIPMENT"
+            "reportType": "GET_FBA_FULFILLMENT_INBOUND_SHIPMENT",
+            "marketplaceIds": ["ATVPDKIKX0DER"] 
         }
 
         response = requests.post(url, auth=auth, headers=headers, json=body)
