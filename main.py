@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 import requests
 import os
 from dotenv import load_dotenv
@@ -21,6 +21,14 @@ REGION = "us-east-1"
 HOST = "sellingpartnerapi-na.amazon.com"
 SERVICE = "execute-api"
 
+TRACKING_STATUSES = [
+    "READY_TO_SHIP",
+    "SHIPPED",
+    "IN_TRANSIT",
+    "DELIVERED",
+    "RECEIVING",
+    "CLOSED"
+]
 
 # 🔐 GET ACCESS TOKEN
 def get_access_token():
@@ -43,7 +51,7 @@ def get_access_token():
     return token
 
 
-# 🔐 AUTH + HEADERS
+# 🔐 AUTH
 def get_auth():
     return AWSRequestsAuth(
         aws_access_key=AWS_ACCESS_KEY,
@@ -54,6 +62,7 @@ def get_auth():
     )
 
 
+# 🔐 HEADERS
 def get_headers(access_token):
     return {
         "x-amz-access-token": access_token,
@@ -65,12 +74,34 @@ def get_headers(access_token):
 # 🏠 ROOT
 @app.get("/")
 def root():
-    return {"message": "SP-API service is running"}
+    return {"message": "SP-API realtime service running"}
 
 
-# 🚚 GET SINGLE PAGE (OPTIONAL)
-@app.get("/getShipments")
-def get_shipments(next_token: str = None):
+# 🧠 ENRICH SHIPMENT DATA
+def enrich_shipment(shipment):
+    status = shipment.get("ShipmentStatus")
+
+    return {
+        "shipmentId": shipment.get("ShipmentId"),
+        "shipmentName": shipment.get("ShipmentName"),
+        "status": status,
+        "labelPrepType": shipment.get("LabelPrepType"),
+        "destinationFC": shipment.get("DestinationFulfillmentCenterId"),
+        "areCasesRequired": shipment.get("AreCasesRequired"),
+        "shipmentType": shipment.get("ShipmentType"),
+        "lastUpdated": shipment.get("LastUpdatedDate"),
+        "isMoving": status in ["SHIPPED", "IN_TRANSIT"],
+        "isCompleted": status in ["DELIVERED", "CLOSED"]
+    }
+
+
+# 🚀 REALTIME SHIPMENTS API
+@app.get("/getShipmentsRealtime")
+def get_shipments_realtime(
+    last_updated_after: str = Query(None),
+    max_pages: int = 5,
+    include_items: bool = False
+):
     try:
         access_token = get_access_token()
         auth = get_auth()
@@ -79,66 +110,21 @@ def get_shipments(next_token: str = None):
         url = f"https://{HOST}/fba/inbound/v0/shipments"
 
         base_params = [
-            ("ShipmentStatusList", "WORKING"),
-            ("ShipmentStatusList", "READY_TO_SHIP"),
-            ("ShipmentStatusList", "SHIPPED"),
-            ("ShipmentStatusList", "IN_TRANSIT"),
-            ("ShipmentStatusList", "DELIVERED"),
-            ("ShipmentStatusList", "CHECKED_IN"),
-            ("ShipmentStatusList", "RECEIVING"),
-            ("ShipmentStatusList", "CLOSED"),
-            ("ShipmentStatusList", "CANCELLED"),
-            ("ShipmentStatusList", "DELETED"),
+            *[("ShipmentStatusList", s) for s in TRACKING_STATUSES],
             ("MarketplaceId", "ATVPDKIKX0DER")
         ]
 
-        params = base_params + ([("NextToken", next_token)] if next_token else [])
-
-        response = requests.get(url, auth=auth, headers=headers, params=params)
-        response.raise_for_status()
-
-        payload = response.json().get("payload", {})
-
-        return {
-            "shipments": payload.get("ShipmentData", []),
-            "nextToken": payload.get("NextToken")
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# 🚀 FINAL: BATCH PAGINATION (NO TIMEOUT)
-@app.get("/getShipmentsBatch")
-def get_shipments_batch(max_pages: int = 3, next_token: str = None):
-    try:
-        access_token = get_access_token()
-        auth = get_auth()
-        headers = get_headers(access_token)
-
-        url = f"https://{HOST}/fba/inbound/v0/shipments"
-
-        base_params = [
-            ("ShipmentStatusList", "WORKING"),
-            ("ShipmentStatusList", "READY_TO_SHIP"),
-            ("ShipmentStatusList", "SHIPPED"),
-            ("ShipmentStatusList", "IN_TRANSIT"),
-            ("ShipmentStatusList", "DELIVERED"),
-            ("ShipmentStatusList", "CHECKED_IN"),
-            ("ShipmentStatusList", "RECEIVING"),
-            ("ShipmentStatusList", "CLOSED"),
-            ("ShipmentStatusList", "CANCELLED"),
-            ("ShipmentStatusList", "DELETED"),
-            ("MarketplaceId", "ATVPDKIKX0DER")
-        ]
+        if last_updated_after:
+            base_params.append(("LastUpdatedAfter", last_updated_after))
 
         all_shipments = []
+        next_token = None
         pages_fetched = 0
 
         while pages_fetched < max_pages:
             params = base_params + ([("NextToken", next_token)] if next_token else [])
 
-            # 🔁 HANDLE RATE LIMIT
+            # 🔁 RATE LIMIT HANDLING
             for attempt in range(5):
                 response = requests.get(url, auth=auth, headers=headers, params=params)
 
@@ -152,9 +138,22 @@ def get_shipments_batch(max_pages: int = 3, next_token: str = None):
                 break
 
             payload = response.json().get("payload", {})
-
             shipments = payload.get("ShipmentData", [])
-            all_shipments.extend(shipments)
+
+            for shipment in shipments:
+                enriched = enrich_shipment(shipment)
+
+                # 📦 OPTIONAL: FETCH ITEMS
+                if include_items:
+                    items = get_shipment_items(
+                        shipment["ShipmentId"],
+                        access_token,
+                        auth,
+                        headers
+                    )
+                    enriched["items"] = items
+
+                all_shipments.append(enriched)
 
             next_token = payload.get("NextToken")
             pages_fetched += 1
@@ -162,10 +161,10 @@ def get_shipments_batch(max_pages: int = 3, next_token: str = None):
             if not next_token:
                 break
 
-            # ✅ SAFE DELAY BETWEEN CALLS
             time.sleep(0.6)
 
         return {
+            "count": len(all_shipments),
             "shipments": all_shipments,
             "nextToken": next_token
         }
@@ -174,23 +173,29 @@ def get_shipments_batch(max_pages: int = 3, next_token: str = None):
         return {"error": str(e)}
 
 
-# 🔍 GET SINGLE SHIPMENT
-@app.get("/getShipment/{shipment_id}")
-def get_shipment(shipment_id: str):
+# 📦 GET SHIPMENT ITEMS
+def get_shipment_items(shipment_id, access_token, auth, headers):
     try:
-        access_token = get_access_token()
-        auth = get_auth()
-        headers = get_headers(access_token)
-
-        url = f"https://{HOST}/fba/inbound/v0/shipments/{shipment_id}"
+        url = f"https://{HOST}/fba/inbound/v0/shipments/{shipment_id}/items"
 
         response = requests.get(url, auth=auth, headers=headers)
         response.raise_for_status()
 
-        return response.json()
+        payload = response.json().get("payload", {})
+        items = payload.get("ItemData", [])
+
+        return [
+            {
+                "sku": item.get("FulfillmentNetworkSKU"),
+                "quantityShipped": item.get("QuantityShipped"),
+                "quantityReceived": item.get("QuantityReceived"),
+                "difference": (item.get("QuantityShipped", 0) - item.get("QuantityReceived", 0))
+            }
+            for item in items
+        ]
 
     except Exception as e:
-        return {"error": str(e)}
+        return [{"error": str(e)}]
 
 
 # ▶️ RUN SERVER
