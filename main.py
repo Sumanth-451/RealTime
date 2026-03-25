@@ -79,6 +79,7 @@ def get_shipments(next_token: str = None):
         url = f"https://{HOST}/fba/inbound/v0/shipments"
 
         base_params = [
+            ("ShipmentStatusList", "WORKING"),
             ("ShipmentStatusList", "READY_TO_SHIP"),
             ("ShipmentStatusList", "SHIPPED"),
             ("ShipmentStatusList", "IN_TRANSIT"),
@@ -109,7 +110,7 @@ def get_shipments(next_token: str = None):
 
 # 🚀 FINAL: BATCH PAGINATION (NO TIMEOUT)
 @app.get("/getShipmentsBatch")
-def get_shipments_batch(max_pages: int = 1, next_token: str = None):
+def get_shipments_batch(max_pages: int = 3, next_token: str = None):
     try:
         access_token = get_access_token()
         auth = get_auth()
